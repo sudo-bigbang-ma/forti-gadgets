@@ -185,9 +185,25 @@ def handle_client(client_socket):
         client_socket.close()
 
 def start_server():
+    # Create SSL context with more permissive settings for FortiGate compatibility
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    
+    # Load certificate and key files
     context.load_cert_chain(certfile='cert.cer', keyfile='key.key')
-
+    
+    # Configure SSL context for better compatibility with FortiGate
+    context.set_ciphers('ALL:@SECLEVEL=0')  # Allow weak ciphers for compatibility
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    
+    # Enable older TLS versions if needed
+    context.minimum_version = ssl.TLSVersion.TLSv1
+    context.maximum_version = ssl.TLSVersion.TLSv1_3
+    
+    # Additional options for compatibility
+    context.options |= ssl.OP_NO_SSLv2
+    context.options |= ssl.OP_NO_SSLv3
+    
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server_socket.bind(('0.0.0.0', 8890))
@@ -196,11 +212,30 @@ def start_server():
     print("[*] Server is listening on port 8890...")
 
     while True:
-        client_socket, client_address = server_socket.accept()
-        ssl_client_socket = context.wrap_socket(client_socket, server_side=True)
+        try:
+            client_socket, client_address = server_socket.accept()
+            print(f"[*] Connection from {client_address}")
+            
+            # Wrap socket with SSL with error handling
+            ssl_client_socket = context.wrap_socket(client_socket, server_side=True)
+            print(f"[*] SSL handshake successful with {client_address}")
 
-        client_thread = threading.Thread(target=handle_client, args=(ssl_client_socket,))
-        client_thread.start()
+            client_thread = threading.Thread(target=handle_client, args=(ssl_client_socket,))
+            client_thread.daemon = True  # Make thread daemon so it closes with main program
+            client_thread.start()
+            
+        except ssl.SSLError as e:
+            print(f"[!] SSL error with client {client_address}: {e}")
+            try:
+                client_socket.close()
+            except:
+                pass
+        except Exception as e:
+            print(f"[!] Unexpected error: {e}")
+            try:
+                client_socket.close()
+            except:
+                pass
 
 if __name__ == "__main__":
     print("[*] FortiGate custom licensing server v0.1")
